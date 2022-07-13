@@ -78,11 +78,11 @@ def _info_predict(eta, Lambda, F, Q_prec, B, u, b):
         Sigma_{t+1|t} = F Sigma_t F^T + Q
 
     The corresponding information form parameters are:
-        eta_{t+1|t} = K eta_t + Lambda_{t+1|t} (B u_t + b)
-        Lambda_{t+1|t} = L Q_prec L^T + K Lambda_t K^T
+        eta_{t+1|t} = J eta_t + Lambda_{t+1|t} (B u_t + b)
+        Lambda_{t+1|t} = L Q_prec L^T + J Lambda_t J^T
     where
-        K = Q_prec F ( Lambda_t + F^T Q_prec F)^{-1}
-        L = I - K F^T
+        J = Q_prec F ( Lambda_t + F^T Q_prec F)^{-1}
+        L = I - J F^T
 
     Args:
         eta (D_hid,): prior precision weighted mean.
@@ -230,12 +230,12 @@ def lgssm_info_smoother(params, emissions, inputs=None):
         pred_eta, pred_prec = _info_predict(filtered_eta, filtered_prec, F, Q_prec, B, u, b)
 
         # This is the information form version of the 'reverse' Kalman gain
-        # See Eq 8.11 of Saarka's "Bayesian Filtering and Smoothing"
-        G = jnp.linalg.solve(Q_prec + smoothed_prec_next - pred_prec, Q_prec @ F)
+        U = Q_prec + smoothed_prec_next - pred_prec
+        L = jnp.linalg.solve(U, Q_prec @ F).T
 
         # Compute the smoothed parameter estimates
-        smoothed_prec = filtered_prec + F.T @ Q_prec @ (F - G)
-        smoothed_eta = filtered_eta + G.T @ (smoothed_eta_next - pred_eta) + (G.T - F.T) @ Q_prec @ (B @ u + b)
+        smoothed_prec = filtered_prec + F.T @ Q_prec @ F - L @ U @ L.T
+        smoothed_eta = filtered_eta + L @ (smoothed_eta_next - pred_eta) + (L - F.T) @ Q_prec @ (B @ u + b)
 
         return (smoothed_eta, smoothed_prec), (smoothed_eta, smoothed_prec)
 
