@@ -110,8 +110,6 @@ def _condition_on(m, P, H, D, d, R, u, y):
     # Compute the Kalman gain
     S = R + H @ P @ H.T
     K = jnp.linalg.solve(S, H @ P).T
-    dim = m.shape[-1]
-    ImKH = jnp.eye(dim) - K @ H
     Sigma_cond = P - K @ S @ K.T
     mu_cond = m + K @ (y - D @ u - d - H @ m)
     return mu_cond, Sigma_cond
