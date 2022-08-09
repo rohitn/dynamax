@@ -15,6 +15,18 @@ from ssm_jax.hmm.models.base import StandardHMM
 from ssm_jax.utils import PSDToRealBijector
 
 
+@chex.dataclass
+class GMMHMMSuffStats:
+    # Wrapper for sufficient statistics of a GMMHMM
+    marginal_loglik: chex.Scalar
+    initial_probs: chex.Array
+    trans_probs: chex.Array
+    m: chex.Array
+    c: chex.Array
+    post_mix_sum: chex.Array
+    post_sum: chex.Array
+
+
 @register_pytree_node_class
 class GaussianMixtureHMM(StandardHMM):
     """
@@ -80,17 +92,6 @@ class GaussianMixtureHMM(StandardHMM):
     # Expectation-maximization (EM) code
     def e_step(self, batch_emissions):
 
-        @chex.dataclass
-        class GMMHMMSuffStats:
-            # Wrapper for sufficient statistics of a GMMHMM
-            marginal_loglik: chex.Scalar
-            initial_probs: chex.Array
-            trans_probs: chex.Array
-            m: chex.Array
-            c: chex.Array
-            post_mix_sum: chex.Array
-            post_sum: chex.Array
-
         def _single_e_step(emissions):
             # Run the smoother
             posterior = hmm_smoother(self._compute_initial_probs(), self._compute_transition_matrices(),
@@ -120,7 +121,6 @@ class GaussianMixtureHMM(StandardHMM):
 
             c_n = jnp.einsum('ijk,ijklm->jklm', post_comp_mix, centered_dots)
 
-            # TODO: might need to normalize x_sum and xxT_sum for numerical stability
             stats = GMMHMMSuffStats(marginal_loglik=posterior.marginal_loglik,
                                     initial_probs=initial_probs,
                                     trans_probs=trans_probs,
