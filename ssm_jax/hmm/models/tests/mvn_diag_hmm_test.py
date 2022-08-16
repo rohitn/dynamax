@@ -38,7 +38,7 @@ class TestGaussianHMMWithDiagonalCovars:
 
         posteriors = hmm.filter(emissions)
         assert not jnp.isnan(posteriors.filtered_probs).any()
-        assert jnp.allclose(posteriors.filtered_probs.sum(axis=1), 1.)
+        assert jnp.allclose(posteriors.filtered_probs.sum(axis=1), 1.0)
 
     def test_smooth(self, key=jr.PRNGKey(0), num_timesteps=100):
         state_sequence, emissions = self.true_hmm.sample(key, num_timesteps)
@@ -47,7 +47,7 @@ class TestGaussianHMMWithDiagonalCovars:
 
         posteriors = hmm.smoother(emissions)
         assert not jnp.isnan(posteriors.filtered_probs).any()
-        assert jnp.allclose(posteriors.filtered_probs.sum(axis=1), 1.)
+        assert jnp.allclose(posteriors.filtered_probs.sum(axis=1), 1.0)
 
         assert not jnp.isnan(posteriors.smoothed_probs).any()
-        assert jnp.allclose(posteriors.smoothed_probs.sum(axis=1), 1.)
+        assert jnp.allclose(posteriors.smoothed_probs.sum(axis=1), 1.0)
