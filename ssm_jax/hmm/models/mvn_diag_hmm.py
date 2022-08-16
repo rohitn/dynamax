@@ -56,8 +56,8 @@ class MultivariateNormalDiagHMM(StandardHMM):
         initial_probs = jr.dirichlet(key1, jnp.ones(num_states))
         transition_matrix = jr.dirichlet(key2, jnp.ones(num_states), (num_states,))
         emission_means = jr.normal(key3, (num_states, emission_dim))
-        emission_covs = jr.exponential(key4, (num_states, emission_dim))
-        return cls(initial_probs, transition_matrix, emission_means, emission_covs)
+        emission_cov_diag_factors = jr.exponential(key4, (num_states, emission_dim))
+        return cls(initial_probs, transition_matrix, emission_means, emission_cov_diag_factors)
 
     # Properties to get various parameters of the model
     @property
