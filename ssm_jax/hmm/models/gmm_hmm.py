@@ -34,9 +34,9 @@ class GaussianMixtureHMM(StandardHMM):
     Hidden Markov Model with Gaussian mixture emissions.
     Attributes
     ----------
-    weights : array, shape (n_components, n_mix)
+    weights : array, shape (num_states, num_emission_components)
         Mixture weights for each state.
-    emission_means : array, shape (n_components, n_mix, n_features)
+    emission_means : array, shape (num_states, num_emission_components, emission_dim)
         Mean parameters for each mixture component in each state.
     emission_covariance_matrices : array
         Covariance parameters for each mixture components in each state.
