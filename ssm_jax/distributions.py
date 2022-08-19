@@ -387,8 +387,8 @@ class NormalInverseChi2(tfd.JointDistributionSequential):
         self._scale = scale
 
         super(NormalInverseChi2, self).__init__([
-            ScaledInverseChi2(df, scale),
-            lambda Sigma: tfd.MultivariateNormalFullCovariance(loc, Sigma / mean_concentration),
+            tfd.InverseGamma(df / 2, df * scale / 2),
+            lambda sigma: tfd.Normal(loc, sigma / mean_concentration),
         ])
 
         self._parameters = dict(loc=loc, mean_concentration=mean_concentration, df=df, scale=scale)

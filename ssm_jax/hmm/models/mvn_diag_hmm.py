@@ -44,7 +44,7 @@ class MultivariateNormalDiagHMM(StandardHMM):
                                               is_frozen=True,
                                               bijector=tfb.Invert(tfb.Softplus()))
         self._emission_prior_scale = Parameter(
-            emission_prior_scale if jnp.ndim(emission_prior_scale) == 2 else emission_prior_scale * jnp.eye(dim),
+            emission_prior_scale * jnp.ones(dim) if isinstance(emission_prior_scale, float) else emission_prior_scale,
             is_frozen=True)
         self._emission_prior_df = Parameter(dim + emission_prior_extra_df,
                                             is_frozen=True,
@@ -78,10 +78,9 @@ class MultivariateNormalDiagHMM(StandardHMM):
         lp = tfd.Dirichlet(self._initial_probs_concentration.value).log_prob(self.initial_probs.value)
         lp += tfd.Dirichlet(self._transition_matrix_concentration.value).log_prob(self.transition_matrix.value).sum()
 
-        diag_fn = vmap(jnp.diag)
         lp += NormalInverseChi2(self._emission_prior_mean.value, self._emission_prior_conc.value,
                                 self._emission_prior_df.value, self._emission_prior_scale.value).log_prob(
-                                    (diag_fn(self._emission_cov_diag_factors.value), self.emission_means.value)).sum()
+                                    (self._emission_cov_diag_factors.value, self.emission_means.value)).sum()
         return lp
 
     # Expectation-maximization (EM) code
@@ -102,7 +101,7 @@ class MultivariateNormalDiagHMM(StandardHMM):
             # Compute the expected sufficient statistics
             sum_w = jnp.einsum("tk->k", posterior.smoothed_probs)
             sum_x = jnp.einsum("tk,ti->ki", posterior.smoothed_probs, emissions)
-            sum_xxT = jnp.einsum("tk,ti,tj->kij", posterior.smoothed_probs, emissions, emissions)
+            sum_x2 = jnp.einsum("tk,ti,ti->ki", posterior.smoothed_probs, emissions, emissions)
 
             # TODO: might need to normalize x_sum and xxT_sum for numerical stability
             stats = GaussianHMMSuffStats(marginal_loglik=posterior.marginal_loglik,
@@ -110,7 +109,7 @@ class MultivariateNormalDiagHMM(StandardHMM):
                                          trans_probs=trans_probs,
                                          sum_w=sum_w,
                                          sum_x=sum_x,
-                                         sum_xxT=sum_xxT)
+                                         sum_xxT=sum_x2)
             return stats
 
         # Map the E step calculations over batches
@@ -133,11 +132,9 @@ class MultivariateNormalDiagHMM(StandardHMM):
             kappa_post = kappa0 + sum_w
             nu_post = nu0 + sum_w
             mu_post = (kappa0 * mu0 + sum_x) / kappa_post
-            Psi_post = (nu0 * Psi0 + kappa0 * jnp.outer(mu0, mu0) + sum_xxT -
-                        kappa_post * jnp.outer(mu_post, mu_post)) / nu_post
+            Psi_post = (nu0 * Psi0 + kappa0 * jnp.square(mu0) + sum_xxT - kappa_post * jnp.square(mu_post)) / nu_post
             return NormalInverseChi2(mu_post, kappa_post, nu_post, Psi_post).mode()
 
-        covs, means = vmap(_single_m_step)(stats.sum_w, stats.sum_x, stats.sum_xxT)
-        diag_fn = vmap(jnp.diag)
-        self.emission_cov_diag_factors.value = diag_fn(covs)
+        emission_cov_diag_factors, means = vmap(_single_m_step)(stats.sum_w, stats.sum_x, stats.sum_xxT)
+        self.emission_cov_diag_factors.value = emission_cov_diag_factors
         self.emission_means.value = means
