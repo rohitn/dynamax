@@ -3,6 +3,7 @@ from functools import partial
 import chex
 import jax.numpy as jnp
 import jax.random as jr
+import tensorflow_probability.substrates.jax.bijectors as tfb
 import tensorflow_probability.substrates.jax.distributions as tfd
 from jax import tree_map
 from jax import vmap
@@ -41,23 +42,29 @@ class GaussianMixtureHMM(StandardHMM):
         Covariance parameters for each mixture components in each state.
     """
 
-    def __init__(
-        self,
-        initial_probabilities,
-        transition_matrix,
-        weights,
-        emission_means,
-        emission_covariance_matrices,
-        initial_probs_concentration=1.1,
-        transition_matrix_concentration=1.1,
-    ):
+    def __init__(self,
+                 initial_probabilities,
+                 transition_matrix,
+                 weights,
+                 emission_means,
+                 emission_covariance_matrices,
+                 initial_probs_concentration=1.1,
+                 transition_matrix_concentration=1.1,
+                 emission_covariance_matrices_prior=0.0,
+                 emission_covariance_matrices_weights=None):
         super().__init__(initial_probabilities,
                          transition_matrix,
                          initial_probs_concentration=initial_probs_concentration,
                          transition_matrix_concentration=transition_matrix_concentration)
-        self._emission_mixture_weights = Parameter(weights)
+        self._emission_mixture_weights = Parameter(weights, bijector=tfb.Invert(tfb.SoftmaxCentered()))
         self._emission_means = Parameter(emission_means)
         self._emission_covs = Parameter(emission_covariance_matrices, bijector=PSDToRealBijector)
+        self._emission_covariance_matrices_prior = Parameter(emission_covariance_matrices_prior, is_frozen=True)
+        emission_dim = emission_means.shape[-1]
+        self._emission_covariance_matrices_weights = Parameter(
+            -(1.0 + emission_dim + 1.0)
+            if emission_covariance_matrices_weights is None else emission_covariance_matrices_weights,
+            is_frozen=True)
 
     @classmethod
     def random_initialization(cls, key, num_states, num_components, emission_dim):
@@ -65,8 +72,8 @@ class GaussianMixtureHMM(StandardHMM):
         initial_probs = jr.dirichlet(key1, jnp.ones(num_states))
         transition_matrix = jr.dirichlet(key2, jnp.ones(num_states), (num_states,))
         emission_mixture_weights = jr.dirichlet(key3, jnp.ones(num_components), shape=(num_states,))
-        emission_means = jr.normal(key4, (num_states, emission_dim))
-        emission_covs = jnp.tile(jnp.eye(emission_dim), (num_states, 1, 1))
+        emission_means = jr.normal(key4, (num_states, num_components, emission_dim))
+        emission_covs = jnp.eye(emission_dim) * jnp.ones((num_states, num_components, emission_dim, emission_dim))
         return cls(initial_probs, transition_matrix, emission_mixture_weights, emission_means, emission_covs)
 
     # Properties to get various parameters of the model
