@@ -33,9 +33,9 @@ class SphericalGaussianMixtureHMM(StandardHMM):
     Hidden Markov Model with Gaussian mixture emissions with spherical covariances.
     Attributes
     ----------
-    weights : array, shape (n_components, n_mix)
+    weights : array, shape (num_states, emission_dim)
         Mixture weights for each state.
-    emission_means : array, shape (n_components, n_mix, n_features)
+    emission_means : array, shape (num_states, num_emission_components, emission_dim)
         Mean parameters for each mixture component in each state.
     emission_cov_diag_factors : array
         Diagonal entries of covariance parameters for each mixture components in each state.
