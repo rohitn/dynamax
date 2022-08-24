@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+from jax.scipy import linalg
 from typing import List, Callable, Optional, Union
 from .variable_node import VariableNode
 from .gaussian import Gaussian, MeasModel
@@ -52,7 +53,7 @@ class Factor:
 
     def compute_factor(self) -> None:
         """
-        Compute the factor at current adjacente beliefs using robust.
+        Compute the factor at current adjacent beliefs using robust.
         If measurement model is linear then factor will always be the same regardless of linearisation point.
         """
         # TODO: can probably get rid of lots of this linearisation stuff.
@@ -73,8 +74,8 @@ class Factor:
         start_dim = 0
         for v in range(len(self.adj_vIDs)):
             eta_factor, lam_factor = self.factor.eta.clone(), self.factor.lam.clone()
-
-            # Take product of factor with incoming messages
+            # Take product of factor with incoming messages other than message from
+            #  the current variable.
             start = 0
             for var in range(len(self.adj_vIDs)):
                 if var != v:
@@ -90,17 +91,15 @@ class Factor:
 
             # Divide up parameters of distribution
             mess_dofs = self.adj_var_nodes[v].dofs
+            # Extract the relevant section of the joint potential vector.
             eo = eta_factor[start_dim : start_dim + mess_dofs]
+            # Combine the rest of the joint eta vector.
             eno = jnp.concatenate((eta_factor[:start_dim], eta_factor[start_dim + mess_dofs :]))
 
+            # Extract the relevant block of the joint precision matrix.
             loo = lam_factor[start_dim : start_dim + mess_dofs, start_dim : start_dim + mess_dofs]
-            lono = jnp.concatenate(
-                (
-                    lam_factor[start_dim : start_dim + mess_dofs, :start_dim],
-                    lam_factor[start_dim : start_dim + mess_dofs, start_dim + mess_dofs :],
-                ),
-                axis=1,
-            )
+
+            # This is the cross precision of current var with rest.
             lnoo = jnp.concatenate(
                 (
                     lam_factor[:start_dim, start_dim : start_dim + mess_dofs],
@@ -108,6 +107,7 @@ class Factor:
                 ),
                 axis=0,
             )
+            # This is the remaining precision block.
             lnono = jnp.concatenate(
                 (
                     jnp.concatenate(
@@ -124,13 +124,14 @@ class Factor:
                 axis=0,
             )
 
-            # TODO: replace inv with solve.
-            new_message_lam = loo - lono @ jnp.linalg.inv(lnono) @ lnoo
-            new_message_eta = eo - lono @ jnp.linalg.inv(lnono) @ eno
+            G = linalg.solve(lnono, lnoo)
+            new_message_lam = loo - G.T @ lnoo
+            new_message_eta = eo - G.T @ eno
             messages_eta.append((1 - damping) * new_message_eta + damping * self.messages[v].eta)
             messages_lam.append((1 - damping) * new_message_lam + damping * self.messages[v].lam)
             start_dim += self.adj_var_nodes[v].dofs
 
         for v in range(len(self.adj_vIDs)):
+            # Update saved messages.
             self.messages[v].lam = messages_lam[v]
             self.messages[v].eta = messages_eta[v]
