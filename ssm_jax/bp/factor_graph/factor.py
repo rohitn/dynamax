@@ -48,8 +48,7 @@ class Factor:
         # print("adj_belifes", self.get_adj_means())
         # print("pred and meas", self.meas_model.meas_fn(self.get_adj_means()), self.measurement)
         # print("residual", self.get_residual(), self.meas_model.loss.effective_cov)
-        # TODO: replace the `inv` with a solve.
-        return 0.5 * residual @ jnp.linalg.inv(self.meas_model.loss.effective_cov) @ residual
+        return 0.5 * residual @ linalg.solve(self.meas_model.loss.effective_cov, residual)
 
     def compute_factor(self) -> None:
         """
@@ -61,10 +60,9 @@ class Factor:
         J = self.meas_model.jac_fn(self.linpoint)
         pred_measurement = self.meas_model.meas_fn(self.linpoint)
         self.meas_model.loss.get_effective_cov(pred_measurement - self.measurement)
-        effective_lam = jnp.linalg.inv(self.meas_model.loss.effective_cov)
-        JT_eff_lam = J.T @ effective_lam
-        self.factor.lam = JT_eff_lam @ J
-        self.factor.eta = ((JT_eff_lam) @ (J @ self.linpoint + self.measurement - pred_measurement)).flatten()
+        eff_lam_J = linalg.solve(self.meas_model.loss.effective_cov, J)
+        self.factor.lam = J.T @ eff_lam_J
+        self.factor.eta = (eff_lam_J.T @ (J @ self.linpoint + self.measurement - pred_measurement)).flatten()
 
     def compute_messages(self, damping: float = 0.0) -> None:
         # TODO: Make this code vaguely comprehensible.
