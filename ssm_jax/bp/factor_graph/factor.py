@@ -5,6 +5,7 @@ from .variable_node import VariableNode
 from .gaussian import Gaussian, MeasModel
 
 
+# TODO: add pos_def arg to linalg.solve where possible.
 class Factor:
     def __init__(
         self,
@@ -97,7 +98,7 @@ class Factor:
             # Extract the relevant block of the joint precision matrix.
             loo = lam_factor[start_dim : start_dim + mess_dofs, start_dim : start_dim + mess_dofs]
 
-            # This is the cross precision of current var with rest.
+            # This is the cross precision of current rest x var.
             lnoo = jnp.concatenate(
                 (
                     lam_factor[:start_dim, start_dim : start_dim + mess_dofs],
@@ -105,7 +106,7 @@ class Factor:
                 ),
                 axis=0,
             )
-            # This is the remaining precision block.
+            # This is the remaining precision block rest x rest.
             lnono = jnp.concatenate(
                 (
                     jnp.concatenate(

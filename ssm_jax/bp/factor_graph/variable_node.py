@@ -6,7 +6,7 @@ class VariableNode:
     def __init__(self, id: int, dofs: int, properties: dict = {}) -> None:
         self.variableID = id
         self.properties = properties
-        self.dofs = dofs  # What is dofs? - some kind of offset?
+        self.dofs = dofs  # What is dofs? - 'dimension of self?'
         self.adj_factors = []
         self.belief = Gaussian(dofs)
         self.prior = Gaussian(dofs)  # prior factor, implemented as part of variable node
