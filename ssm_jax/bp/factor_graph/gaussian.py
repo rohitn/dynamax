@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+from jax.scipy import linalg
 from typing import List, Callable, Optional, Union
 
 
@@ -19,10 +20,10 @@ class Gaussian:
             self.lam = jnp.zeros([dim, dim], dtype=type)
 
     def mean(self) -> jnp.array:
-        return jnp.matmul(jnp.linalg.inv(self.lam), self.eta)
+        return linalg.solve(self.lam, self.eta)
 
     def cov(self) -> jnp.array:
-        return jnp.linalg.inv(self.lam)
+        return linalg.inv(self.lam)
 
     def mean_and_cov(self) -> List[jnp.array]:
         cov = self.cov()
