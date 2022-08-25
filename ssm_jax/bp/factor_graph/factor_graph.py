@@ -51,7 +51,7 @@ class FactorGraph:
             var_node.update_belief()
 
     def compute_all_messages(self, apply_dropout: bool = True) -> None:
-            damping = self.gbp_settings.damping
+        damping = self.gbp_settings.damping
         for factor in self.factors:
             factor.compute_messages(damping)
 
