@@ -3,6 +3,41 @@ from jax import jit
 from jax import numpy as jnp
 from jax.tree_util import tree_map
 
+def extract_precision_blocks(A,idxs):
+    # TODO: improve this docstring, use a 5x5 input so that D-N != N
+    # TODO: A12 vs A21, get correct in doc.
+    """
+    E.g. A = [[ 0,  1,  2,  3,  4],
+              [ 5,  6,  7,  8,  9],
+              [10, 11, 12, 13, 14],
+              [15, 16, 17, 18, 19],
+              [20, 21, 22, 23, 24]]
+        idxs = [1,2]
+        split_precision_blocks(A,idxs) -->
+            A11 - [[ 6,  7],
+                   [11, 12]]
+
+            A12 - [[ 5,  8,  9],
+                   [10, 13, 14]]
+
+            A22 - [[ 0,  3,  4],
+                   [15, 18, 19],
+                   [20, 23, 24]]
+
+    Args:
+        A (D x D) precision matrix.
+        idxs (N,) array of indices in 1,...,D.
+    Returns:
+        A11 (N x N) block of elements with row and column in `indxs`
+        A12 (N x D-N) block of elements with row in `indxs` but column not in `indxs`.
+        A22 (D-N x D-N) block of elements with neither row nor column in `indxs`.
+    """
+    idx_range = jnp.arange(len(A))
+    b = jnp.isin(idx_range,idxs)
+    A11 = A[b,:][:,b]
+    A12 = A[b,:][:,~b]
+    A22 = A[~b,:][:,~b]
+    return A11, A12, A22
 
 def info_marginalize(Kxx, Kxy, Kyy, hx, hy):
     """Calculate the parameters of marginalized MVN.
