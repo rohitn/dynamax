@@ -93,7 +93,6 @@ class CanonicalFactor:
 
     def compute_messages(self, damping: float = 0.0) -> None:
         """Compute all outgoing messages from the factor."""
-        # TODO: I think there is a problem with the initial message + damping here.
         pot_plus_all_messages = self._absorb_var_messages()
         for var in self.adj_var_nodes:
             vID = var.variableID
