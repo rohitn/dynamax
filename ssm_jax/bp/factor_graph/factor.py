@@ -70,24 +70,22 @@ class Factor:
         """Compute all outgoing messages from the factor."""
         messages_eta, messages_lam = [], []
 
+        eta_factor, lam_factor = self.factor.eta.clone(), self.factor.lam.clone()
+        # Take product of factor with incoming messages other than message from
+        #  the current variable.
+        start = 0
+        for var in range(len(self.adj_vIDs)):
+            var_dofs = self.adj_var_nodes[var].dofs
+            eta_factor = eta_factor.at[start : start + var_dofs].add(
+                self.adj_var_nodes[var].belief.eta - self.messages[var].eta
+            )
+            lam_factor = lam_factor.at[start : start + var_dofs, start : start + var_dofs].add(
+                self.adj_var_nodes[var].belief.lam - self.messages[var].lam
+            )
+            start += self.adj_var_nodes[var].dofs
+
         start_dim = 0
         for v in range(len(self.adj_vIDs)):
-            eta_factor, lam_factor = self.factor.eta.clone(), self.factor.lam.clone()
-            # Take product of factor with incoming messages other than message from
-            #  the current variable.
-            start = 0
-            for var in range(len(self.adj_vIDs)):
-                if var != v:
-                    var_dofs = self.adj_var_nodes[var].dofs
-                    eta_factor = eta_factor.at[start : start + var_dofs].add(
-                        self.adj_var_nodes[var].belief.eta - self.messages[var].eta
-                    )
-                    lam_factor = lam_factor.at[start : start + var_dofs, start : start + var_dofs].add(
-                        self.adj_var_nodes[var].belief.lam - self.messages[var].lam
-                    )
-
-                start += self.adj_var_nodes[var].dofs
-
             # Divide up parameters of distribution
             mess_dofs = self.adj_var_nodes[v].dofs
             # Extract the relevant section of the joint potential vector.
@@ -98,7 +96,7 @@ class Factor:
             # Extract the relevant block of the joint precision matrix.
             loo = lam_factor[start_dim : start_dim + mess_dofs, start_dim : start_dim + mess_dofs]
 
-            # This is the cross precision of current rest x var.
+            # This is the cross precision of rest x current var.
             lnoo = jnp.concatenate(
                 (
                     lam_factor[:start_dim, start_dim : start_dim + mess_dofs],
@@ -124,8 +122,11 @@ class Factor:
             )
 
             G = linalg.solve(lnono, lnoo)
-            new_message_lam = loo - G.T @ lnoo
-            new_message_eta = eo - G.T @ eno
+            # you can subtract the incoming message after marginalising.
+            this_var_message_lam = self.adj_var_nodes[v].belief.lam - self.messages[v].lam 
+            this_var_message_eta = self.adj_var_nodes[v].belief.eta - self.messages[v].eta
+            new_message_lam = loo - G.T @ lnoo - this_var_message_lam
+            new_message_eta = eo - G.T @ eno - this_var_message_eta
             messages_eta.append((1 - damping) * new_message_eta + damping * self.messages[v].eta)
             messages_lam.append((1 - damping) * new_message_lam + damping * self.messages[v].lam)
             start_dim += self.adj_var_nodes[v].dofs
