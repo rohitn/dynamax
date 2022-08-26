@@ -50,8 +50,12 @@ class GaussianMixtureHMM(StandardHMM):
                  emission_covariance_matrices,
                  initial_probs_concentration=1.1,
                  transition_matrix_concentration=1.1,
-                 emission_covariance_matrices_prior=0.0,
-                 emission_covariance_matrices_weights=None):
+                 emission_mixture_weights_concentration=1.,
+                 emission_prior_mean=0.,
+                 emission_prior_mean_scale=0.,
+                 emission_prior_covariance_matrices_concentration=-1.5,
+                 emission_prior_covariance_matrices_scale=0.):
+
         super().__init__(initial_probabilities,
                          transition_matrix,
                          initial_probs_concentration=initial_probs_concentration,
@@ -59,12 +63,6 @@ class GaussianMixtureHMM(StandardHMM):
         self._emission_mixture_weights = Parameter(weights, bijector=tfb.Invert(tfb.SoftmaxCentered()))
         self._emission_means = Parameter(emission_means)
         self._emission_covs = Parameter(emission_covariance_matrices, bijector=PSDToRealBijector)
-        self._emission_covariance_matrices_prior = Parameter(emission_covariance_matrices_prior, is_frozen=True)
-        emission_dim = emission_means.shape[-1]
-        self._emission_covariance_matrices_weights = Parameter(
-            -(1.0 + emission_dim + 1.0)
-            if emission_covariance_matrices_weights is None else emission_covariance_matrices_weights,
-            is_frozen=True)
 
     @classmethod
     def random_initialization(cls, key, num_states, num_components, emission_dim):

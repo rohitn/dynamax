@@ -50,8 +50,12 @@ class TiedGaussianMixtureHMM(StandardHMM):
                  emission_covariance_matrix,
                  initial_probs_concentration=1.1,
                  transition_matrix_concentration=1.1,
-                 emission_covariance_matrices_prior=0.0,
-                 emission_covariance_matrices_weight=None):
+                 emission_mixture_weights_concentration=1.,
+                 emission_prior_mean=0.,
+                 emission_prior_mean_scale=0.,
+                 emission_prior_covariance_matrices_concentration=-1.5,
+                 emission_prior_covariance_matrices_scale=0.):
+
         super().__init__(initial_probabilities,
                          transition_matrix,
                          initial_probs_concentration=initial_probs_concentration,
@@ -59,12 +63,42 @@ class TiedGaussianMixtureHMM(StandardHMM):
         self._emission_mixture_weights = Parameter(weights, bijector=tfb.Invert(tfb.SoftmaxCentered()))
         self._emission_means = Parameter(emission_means)
         self._emission_cov = Parameter(emission_covariance_matrix, bijector=PSDToRealBijector)
-        self._emission_covariance_matrices_prior = Parameter(emission_covariance_matrices_prior, is_frozen=True)
-        _, num_emission_components, emission_dim = emission_means.shape
-        self._emission_covariance_matrices_weight = Parameter(
-            -(num_emission_components + emission_dim + 1.0)
-            if emission_covariance_matrices_weight is None else emission_covariance_matrices_weight,
-            is_frozen=True)
+
+        num_states, num_components, emission_dim = emission_means.shape
+
+        _emission_mixture_weights_concentration = emission_mixture_weights_concentration * jnp.ones(
+            (num_states, num_components)) if isinstance(emission_mixture_weights_concentration,
+                                                        float) else emission_mixture_weights_concentration
+        assert _emission_mixture_weights_concentration.shape == (num_states, num_components)
+        self._emission_mixture_weights_concentration = Parameter(_emission_mixture_weights_concentration,
+                                                                 is_frozen=True,
+                                                                 bijector=tfb.Invert(tfb.Softplus()))
+
+        _emission_prior_mean = emission_prior_mean * jnp.ones((num_states, num_components, emission_dim)) if isinstance(
+            emission_prior_mean, float) else emission_prior_mean
+        assert _emission_prior_mean.shape == (num_states, num_components, emission_dim)
+        self._emission_prior_mean = Parameter(_emission_prior_mean, is_frozen=True)
+
+        _emission_prior_mean_scale = emission_prior_mean_scale * jnp.ones(
+            (num_states, num_components, emission_dim)) if isinstance(emission_prior_mean_scale,
+                                                                      float) else emission_prior_mean_scale
+        assert _emission_prior_mean_scale.shape == (num_states, num_components, emission_dim)
+        self._emission_prior_mean_scale = Parameter(_emission_prior_mean_scale, is_frozen=True)
+
+        _emission_prior_covariance_matrices_concentration = emission_prior_covariance_matrices_concentration * jnp.ones(
+            (num_states, num_components, emission_dim)) if isinstance(
+                emission_prior_covariance_matrices_concentration,
+                float) else emission_prior_covariance_matrices_concentration
+        assert _emission_prior_covariance_matrices_concentration.shape == (num_states, num_components, emission_dim)
+        self._emission_prior_covariance_matrices_concentration = Parameter(
+            _emission_prior_covariance_matrices_concentration, is_frozen=True)
+
+        _emission_prior_covariance_matrices_scale = emission_prior_covariance_matrices_scale * jnp.ones(
+            (num_states, num_components, emission_dim)) if isinstance(
+                emission_prior_covariance_matrices_scale, float) else emission_prior_covariance_matrices_scale
+        assert _emission_prior_covariance_matrices_scale.shape == (num_states, num_components, emission_dim)
+        self._emission_prior_covariance_matrices_scale = Parameter(_emission_prior_covariance_matrices_scale,
+                                                                   is_frozen=True)
 
     @classmethod
     def random_initialization(cls, key, num_states, num_components, emission_dim):
