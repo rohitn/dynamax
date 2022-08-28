@@ -89,26 +89,26 @@ def info_condition(Kxx, Kxy, hx, y):
 def potential_from_conditional_linear_gaussian(A, offset, Lambda):
     """Express a conditional linear Gaussian as a potential in canonical form.
 
-    p(y|z) = N(y | Az + offset, Lambda^{-1})
-           \prop exp( -0.5(y z)^T K (y z) + (y z)^T h )
+    p(y|x) = N(y | Ax + offset, Lambda^{-1})
+           \prop exp( -0.5(y x)^T K (y x) + (y x)^T h )
     where,
         K = (Lambda; -Lambda A,  -A.T Lambda; A.T Lambda A)
         h = (Lambda offset, -A.T Lambda offset)
 
     Args:
-        A (dim_y, dim_z)
+        A (dim_y, dim_x)
         offset (dim_y,1)
         Lambda (dim_y, dim_y)
     Returns:
-        K (dim_z + dim_y, dim_z + dim_y)
-        h (dim_z + dim_y,1)
+        K (dim_x + dim_y, dim_x + dim_y)
+        h (dim_x + dim_y,1)
     """
-    Kzy = -A.T @ Lambda
-    Kzz = -Kzy @ A
+    Kxy = -A.T @ Lambda
+    Kxx = -Kxy @ A
     Kyy = Lambda
     hy = Lambda @ offset
-    hz = -A.T @ hy
-    return (Kzz, Kzy, Kyy), (hz, hy)
+    hx = -A.T @ hy
+    return (Kxx, Kxy, Kyy), (hx, hy)
 
 
 def info_multiply(params1, params2):
