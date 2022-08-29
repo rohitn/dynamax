@@ -60,6 +60,10 @@ def zeros_canonical_pot(dim):
     Lambda = jnp.zeros((dim,dim))
     return CanonicalPotential(eta=eta, Lambda=Lambda)
 
+def clone_canonical_pot(cpot):
+    eta = cpot.eta.clone()
+    Lambda = cpot.Lambda.clone()
+    return CanonicalPotential(eta, Lambda)
 
 class GaussianVariableNode:
     def __init__(self, id: int, dim: int, prior: Optional[CanonicalPotential] = None) -> None:
@@ -71,7 +75,7 @@ class GaussianVariableNode:
 
     def update_belief(self) -> None:
         """Update local belief estimate by taking product of all incoming messages along all edges."""
-        belief = jax.tree_map(lambda l: l.clone(), self.prior)
+        belief = clone_canonical_pot(self.prior)
         for factor in self.adj_factors:
             message = factor.messages_to_vars[self.variableID]
             belief = info_multiply(belief, message)
@@ -79,15 +83,15 @@ class GaussianVariableNode:
 
 
 class CanonicalFactor:
-    def __init__(self, id: int, adj_var_nodes: List[GaussianVariableNode], factor: CanonicalPotential):
+    def __init__(self, id: int, adj_var_nodes: List[GaussianVariableNode], potential: CanonicalPotential):
         self.factorID = id
         self.adj_var_nodes = adj_var_nodes
         self.adj_vIDs = [var.variableID for var in adj_var_nodes]
-        self.factor = factor
-        self.dim = self.factor.Lambda.shape[0]
+        self.potential = potential
+        self.dim = self.potential.Lambda.shape[0]
         self.var_scopes = self._calculate_var_scopes()
         self.messages_to_vars = dict()
-
+        
         assert self.dim == sum([var.dim for var in adj_var_nodes])
 
 
@@ -103,7 +107,8 @@ class CanonicalFactor:
             # Apply damping
             damped_message = jax.tree_map(lambda x,y: damping * x + (1-damping) * y,
                                           self.messages_to_vars[vID], new_factor_to_var_message)
-            self.messages_to_vars[vID] = damped_message
+            # TODO: Might need to replace nans with zeros somewhere here.
+            self.messages_to_vars[vID] = jax.tree_map(jnp.nan_to_num, damped_message)
 
     def _set_messages_to_zero(self):
         for var in self.adj_var_nodes:
@@ -118,7 +123,7 @@ class CanonicalFactor:
         return var_scopes
 
     def _absorb_var_messages(self):
-        eta, Lambda = self.factor.eta.clone(), self.factor.Lambda.clone()
+        eta, Lambda = clone_canonical_pot(self.potential)
         for var in self.adj_var_nodes:
             vID = var.variableID
             var_start, var_stop = self.var_scopes[vID]
@@ -217,7 +222,11 @@ class GaussianFactorGraph:
     def get_joint_dim(self) -> int:
         return sum([var.dofs for var in self.var_nodes])
 
-    def print(self, brief=False) -> None:
+    def reset_beliefs(self):
+        for var in self.var_nodes:
+            var.belief = zeros_canonical_pot(var.dim)
+
+    def print(self, brief=False, print_beliefs=False) -> None:
         print("\nFactor Graph:")
         print(f"# Variable nodes: {len(self.var_nodes)}")
         if not brief:
@@ -228,4 +237,9 @@ class GaussianFactorGraph:
         if not brief:
             for i, factor in enumerate(self.factors):
                 print(f"Factor {i}: connects to variables {factor.adj_vIDs}")
+        if print_beliefs:
+            for var in self.var_nodes:
+                print(f"Variable {var.variableID} - beliefs:")
+                print(f"eta: {var.belief.eta}")
+                print(f"Lambda: {var.belief.Lambda}")
         print("\n")
