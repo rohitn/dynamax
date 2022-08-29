@@ -65,11 +65,21 @@ def clone_canonical_pot(cpot):
     Lambda = cpot.Lambda.clone()
     return CanonicalPotential(eta, Lambda)
 
+def absorb_canonical_message(cpot,message,message_scope):
+    var_start, var_stop = message_scope
+    eta = cpot.eta.at[var_start : var_stop].add(message.eta)
+    Lambda = cpot.Lambda.at[var_start:var_stop, var_start:var_stop].add(
+        message.Lambda
+    )
+    return CanonicalPotential(eta, Lambda)
+
+
 class GaussianVariableNode:
     def __init__(self, id: int, dim: int, prior: Optional[CanonicalPotential] = None) -> None:
         self.variableID = id
         self.dim = dim
         self.adj_factors = []
+        # TODO: Put prior in a CanonicalFactor instead? 
         self.prior = prior if prior is not None else zeros_canonical_pot(self.dim)
         self.belief = jax.tree_map(lambda l: l.clone(), self.prior)
 
@@ -97,18 +107,24 @@ class CanonicalFactor:
 
     def compute_messages(self, damping: float = 0.0) -> None:
         """Compute all outgoing messages from the factor."""
-        pot_plus_all_messages = self._absorb_var_messages()
-        for var in self.adj_var_nodes:
-            vID = var.variableID
-            marginal_pot = self._marginalise_onto_var(pot_plus_all_messages, vID)
-            # Subtract off the message sent from the variable to this factor
-            var_to_factor_message = info_divide(var.belief, self.messages_to_vars[vID])
-            new_factor_to_var_message = info_divide(marginal_pot, var_to_factor_message)
-            # Apply damping
-            damped_message = jax.tree_map(lambda x,y: damping * x + (1-damping) * y,
-                                          self.messages_to_vars[vID], new_factor_to_var_message)
-            # TODO: Might need to replace nans with zeros somewhere here.
-            self.messages_to_vars[vID] = jax.tree_map(jnp.nan_to_num, damped_message)
+        # TODO: The current handling of single variable factors feels a bit ugly.
+        if len(self.adj_var_nodes) == 1:
+            vID = self.adj_var_nodes[0].variableID
+            self.messages_to_vars[vID] = clone_canonical_pot(self.potential)
+        else:
+            pot_plus_all_messages = self._absorb_var_messages()
+            for var in self.adj_var_nodes:
+                vID = var.variableID
+                marginal_pot = self._marginalise_onto_var(pot_plus_all_messages, vID)
+                # Subtract off the message sent from the variable to this factor
+                var_to_factor_message = info_divide(var.belief, self.messages_to_vars[vID])
+                new_factor_to_var_message = info_divide(marginal_pot, var_to_factor_message)
+                # Apply damping
+                damped_message = jax.tree_map(lambda x,y: damping * x + (1-damping) * y,
+                                            self.messages_to_vars[vID], new_factor_to_var_message)
+                # TODO: Might need to replace nans with zeros somewhere here.
+                # self.messages_to_vars[vID] = jax.tree_map(jnp.nan_to_num, damped_message)
+                self.messages_to_vars[vID] = damped_message
 
     def _set_messages_to_zero(self):
         for var in self.adj_var_nodes:
@@ -123,19 +139,12 @@ class CanonicalFactor:
         return var_scopes
 
     def _absorb_var_messages(self):
-        eta, Lambda = clone_canonical_pot(self.potential)
+        pot = clone_canonical_pot(self.potential)
         for var in self.adj_var_nodes:
             vID = var.variableID
-            var_start, var_stop = self.var_scopes[vID]
-            # TODO: make a function to wrap these two operations
-            #  f(pot, message, scope) -> pot_plus_message
-            eta = eta.at[var_start : var_stop].add(
-                var.belief.eta - self.messages_to_vars[vID].eta
-            )
-            Lambda = Lambda.at[var_start:var_stop, var_start:var_stop].add(
-                var.belief.Lambda - self.messages_to_vars[vID].Lambda
-            )
-        return CanonicalPotential(eta, Lambda)
+            var_message = info_divide(var.belief, self.messages_to_vars[vID])
+            pot = absorb_canonical_message(pot,var_message, self.var_scopes[vID])
+        return pot 
 
     def _marginalise_onto_var(self, potential, varID):
         var_idxs = jnp.arange(*self.var_scopes[varID])
