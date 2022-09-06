@@ -1,9 +1,16 @@
+import functools
+from functools import partial
 import jax
 import jax.numpy as jnp
-from jax.scipy import linalg
+from jax import vmap, jit
+from jax.tree_util import tree_leaves
 from typing import List, NamedTuple, Optional, Tuple
 
-from ssm_jax.bp.gauss_bp_utils import info_multiply, info_divide, info_marginalize
+from ssm_jax.bp.gauss_bp_utils import (info_multiply,
+                                       info_divide,
+                                       info_marginalize, 
+                                       potential_from_conditional_linear_gaussian,
+                                       pair_cpot_condition)
 
 class CanonicalPotential(NamedTuple):
     eta: jnp.ndarray
@@ -65,6 +72,7 @@ def clone_canonical_pot(cpot):
     Lambda = cpot.Lambda.clone()
     return CanonicalPotential(eta, Lambda)
 
+@partial(jax.jit,static_argnums=2)
 def absorb_canonical_message(cpot,message,message_scope):
     var_start, var_stop = message_scope
     eta = cpot.eta.at[var_start : var_stop].add(message.eta)
@@ -73,6 +81,17 @@ def absorb_canonical_message(cpot,message,message_scope):
     )
     return CanonicalPotential(eta, Lambda)
 
+
+def _tree_reduce(function, tree, initializer=None, is_leaf=None):
+    if initializer is None:
+        return functools.reduce(function, tree_leaves(tree,is_leaf))
+    else:
+        return functools.reduce(function, tree_leaves(tree,is_leaf), initializer)
+
+@jax.jit
+def sum_reduce_cpots(cpots, initializer=None):
+    return _tree_reduce(info_multiply, cpots, initializer, 
+                        is_leaf=lambda l: isinstance(l,CanonicalPotential))
 
 class GaussianVariableNode:
     def __init__(self, id: int, dim: int, prior: Optional[CanonicalPotential] = None) -> None:
@@ -85,10 +104,13 @@ class GaussianVariableNode:
 
     def update_belief(self) -> None:
         """Update local belief estimate by taking product of all incoming messages along all edges."""
-        belief = clone_canonical_pot(self.prior)
-        for factor in self.adj_factors:
-            message = factor.messages_to_vars[self.variableID]
-            belief = info_multiply(belief, message)
+        prior = clone_canonical_pot(self.prior)
+        cpots = [f.messages_to_vars[self.variableID] for f in self.adj_factors]
+        belief = sum_reduce_cpots(cpots, prior)
+        # belief = clone_canonical_pot(self.prior)
+        # for factor in self.adj_factors:
+        #     message = factor.messages_to_vars[self.variableID]
+        #     belief = info_multiply(belief, message)
         self.belief = belief
 
 
@@ -108,6 +130,8 @@ class CanonicalFactor:
     def compute_messages(self, damping: float = 0.0) -> None:
         """Compute all outgoing messages from the factor."""
         # TODO: The current handling of single variable factors feels a bit ugly.
+        # Could change zero_messages --> init_messages and set message to potential
+        #  if len(adj_vars) == 1, then just pass here.
         if len(self.adj_var_nodes) == 1:
             vID = self.adj_var_nodes[0].variableID
             self.messages_to_vars[vID] = clone_canonical_pot(self.potential)
@@ -212,24 +236,21 @@ class GaussianFactorGraph:
 
     def energy(self, eval_point: jnp.array = None, include_priors: bool = True) -> float:
         """Computes the sum of all of the squared errors in the graph using the appropriate local loss function."""
-        if eval_point is None:
-            energy = sum([factor.get_energy() for factor in self.factors])
-        else:
-            var_dofs = jnp.array([v.dofs for v in self.var_nodes])
-            var_ix = jnp.concatenate([0, jnp.cumsum(var_dofs, axis=0)[:-1]])
-            energy = 0.0
-            for f in self.factors:
-                local_eval_point = jnp.concatenate(
-                    [eval_point[var_ix[v.variableID] : var_ix[v.variableID] + v.dofs] for v in f.adj_var_nodes]
-                )
-                energy += f.get_energy(local_eval_point)
+        var_dofs = jnp.array([v.dofs for v in self.var_nodes])
+        var_ix = jnp.concatenate([0, jnp.cumsum(var_dofs, axis=0)[:-1]])
+        energy = 0.0
+        for f in self.factors:
+            local_eval_point = jnp.concatenate(
+                [eval_point[var_ix[v.variableID] : var_ix[v.variableID] + v.dofs] for v in f.adj_var_nodes]
+            )
+            energy += f.get_energy(local_eval_point)
         if include_priors:
             prior_energy = sum([var.get_prior_energy() for var in self.var_nodes])
             energy += prior_energy
         return energy
 
     def get_joint_dim(self) -> int:
-        return sum([var.dofs for var in self.var_nodes])
+        return sum([var.dim for var in self.var_nodes])
 
     def reset_beliefs(self):
         for var in self.var_nodes:
@@ -252,3 +273,64 @@ class GaussianFactorGraph:
                 print(f"eta: {var.belief.eta}")
                 print(f"Lambda: {var.belief.Lambda}")
         print("\n")
+
+
+def canonical_factor_from_clg(A,u,Lambda,x,y,factorID):
+    (Kxx, Kxy, Kyy), (hx,hy) = potential_from_conditional_linear_gaussian(A,u,Lambda)
+    K = jnp.block([[Kxx, Kxy],
+                    [Kxy.T, Kyy]])
+    h = jnp.concatenate((hx,hy))
+    cpot = CanonicalPotential(eta=h, Lambda=K)
+    return CanonicalFactor(factorID, [x,y], cpot)
+
+def factor_graph_from_lgssm(lgssm_params,inputs, obs, T=None):
+    
+    if inputs is None:
+        if T is not None:
+            D_in = lgssm_params.dynamics_input_weights.shape[1]
+            inputs = jnp.zeros((T, D_in))
+        else:
+            raise ValueError("One of `inputs` or `T` must not be None.")
+
+    num_timesteps = len(inputs)
+    Lambda0, mu0 = lgssm_params.initial_precision, lgssm_params.initial_mean
+    prior_pot = (Lambda0, Lambda0 @ mu0)
+    latent_dim = len(mu0)
+
+    latent_vars = [GaussianVariableNode(f"x{i}", latent_dim) for i in range(num_timesteps)]
+    x0 = latent_vars[0]
+    x0.prior = CanonicalPotential(eta = Lambda0 @ mu0, Lambda = Lambda0)
+    
+    B, b = lgssm_params.dynamics_input_weights, lgssm_params.dynamics_bias
+    F, Q_prec = lgssm_params.dynamics_matrix, lgssm_params.dynamics_precision
+    latent_net_inputs = vmap(jnp.dot, (None, 0))(B, inputs) + b
+    latent_factors = [canonical_factor_from_clg(F,latent_net_inputs[i], Q_prec,
+                                                latent_vars[i], latent_vars[i+1],
+                                                f"latent_{i},{i+1}")
+                      for i in range(num_timesteps-1)]
+    
+    D, d = lgssm_params.emission_input_weights, lgssm_params.emission_bias
+    H, R_prec = lgssm_params.emission_matrix, lgssm_params.emission_precision
+    
+    emission_net_inputs = vmap(jnp.dot, (None, 0))(D, inputs) + d
+    emission_pots = vmap(potential_from_conditional_linear_gaussian, (None, 0, None))(H, emission_net_inputs, R_prec)
+    local_evidence_pots = vmap(partial(pair_cpot_condition, obs_var=2))(emission_pots, obs)
+    
+    emission_factors = [CanonicalFactor(f"emission_{i}",
+                                        [latent_var],
+                                        CanonicalPotential(eta,Lambda))
+                        for i, latent_var, Lambda, eta in zip(range(num_timesteps), latent_vars, *local_evidence_pots)]
+    
+    fg = GaussianFactorGraph()
+    for x in latent_vars:
+        fg.add_var_node(x)
+
+    for latent_fact in latent_factors:
+        fg.add_factor(latent_fact)
+
+    for em_fact in emission_factors:
+        fg.add_factor(em_fact)
+
+    fg.set_messages_to_zero()
+    
+    return fg
